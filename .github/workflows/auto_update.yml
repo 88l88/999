@@ -2,7 +2,7 @@ name: Auto Update 7788.js
 
 on:
   schedule:
-    - cron: '45 12 * * 1-6'
+    - cron: '45 13 * * 1-6'
     - cron: '30 19 * * 1-6'
   
   workflow_dispatch:
