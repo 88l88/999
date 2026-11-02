@@ -2,7 +2,7 @@ name: Auto Update Lottery
 
 on:
   schedule:
-    - cron: '0 7 * * 1-6'   # 台灣時間 15:00 測試用
+    - cron: '0 10 * * 1-6'   # 台灣時間 15:00 測試用
     - cron: '40 12 * * 1-6' # 台灣時間 20:35 正式開獎用
   workflow_dispatch:
 
