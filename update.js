@@ -34,10 +34,8 @@ async function main() {
     let targetDate = getTargetDrawDate(twTime);
     console.log(`目標日期: ${targetDate}，vvv.js 目前首列日期: ${topDate}`);
 
-    // 判斷時段決定要抓「順球」還是「落球」
-    // 20:45 (1245分鐘) 之後抓落球，其餘抓順球
-   // let isDropTime = totalMins >= 1245; 
-    let isDropTime = true;
+    // 20:45 (1245分鐘) 之後抓 9800 落球，其餘抓 Pilio 順球
+    let isDropTime = totalMins >= 1245; 
     let numbers = null;
     let modeName = '';
 
@@ -54,19 +52,11 @@ async function main() {
         return;
     }
 
-    // 核心邏輯：若是落球時間，直接更新/替換首列；若是順球時間且日期不同則 unshift 插入
     if (topDate < targetDate) {
-        if (isDropTime) {
-            // 如果到了落球時間但首列還是舊日期的話，直接插入落球
-            records.unshift([targetDate, numbers]);
-            console.log(`[新增首列 - ${modeName}] 成功插入 ${targetDate}: [${numbers.join(',')}]`);
-        } else {
-            records.unshift([targetDate, numbers]);
-            console.log(`[新增首列 - ${modeName}] 成功插入 ${targetDate}: [${numbers.join(',')}]`);
-        }
+        records.unshift([targetDate, numbers]);
+        console.log(`[新增首列 - ${modeName}] 成功插入 ${targetDate}: [${numbers.join(',')}]`);
     } else if (topDate === targetDate) {
         if (isDropTime) {
-            // 用落球替換當天的順球
             topRecord[1] = numbers;
             console.log(`[替換為落球 - ${modeName}] 成功更新 ${targetDate} 為落球: [${numbers.join(',')}]`);
         } else {
@@ -94,7 +84,6 @@ function getTargetDrawDate(twTime) {
     let minutes = twTime.getMinutes();
     let totalMins = hours * 60 + minutes;
 
-    // 20:40 以前視為尚未到當日開獎時間，目標往前推一天
     if (totalMins < 1240) {
         twTime.setDate(twTime.getDate() - 1);
     }
@@ -108,7 +97,7 @@ function getTargetDrawDate(twTime) {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-// 1. 抓取 Pilio 順球 (大小順序)
+// 1. 抓取 Pilio 順球
 async function fetchPilioShun() {
     try {
         const response = await axios.get('https://www.pilio.idv.tw/', {
@@ -129,7 +118,7 @@ async function fetchPilioShun() {
     return null;
 }
 
-// 2. 抓取 9800 網站的落球 (開出順序)
+// 2. 抓取 9800 網站的落球 (根據您提供的 TR 結構精準解析)
 async function fetch9800Drop(targetDate) {
     try {
         const response = await axios.get('https://www.9800.com.tw/lotto539/drop.html', {
@@ -139,14 +128,11 @@ async function fetch9800Drop(targetDate) {
         });
         const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
         
-        // 尋找包含目標日期的整行 TR，並抓取最後一個綠色欄位（落球序）
-        // 對應您提供的結構：第五欄為落球
-        const datePattern = new RegExp(targetDate.replace(/-/g, '[^\\d]?'), 'g');
-        // 簡單透過正規表達式尋找對應日期的表格列
         const rows = htmlText.split('<TR');
         for (let row of rows) {
+            // 比對日期
             if (row.includes(targetDate)) {
-                // 抓取含有落球的欄位 (通常是最後一個靠右或特定 color="#006600" 的欄位)
+                // 抓取綠色字 color="#006600" 的落球欄位
                 const matchDrop = row.match(/color="#006600"[^>]*>([^<]+)</);
                 if (matchDrop && matchDrop[1]) {
                     const rawDrop = matchDrop[1].replace(/&nbsp;/g, ' ').trim();
