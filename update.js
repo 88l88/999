@@ -36,7 +36,8 @@ async function main() {
 
     // 判斷時段決定要抓「順球」還是「落球」
     // 20:45 (1245分鐘) 之後抓落球，其餘抓順球
-    let isDropTime = totalMins >= 1245; 
+   // let isDropTime = totalMins >= 1245; 
+    let isDropTime = true;
     let numbers = null;
     let modeName = '';
 
