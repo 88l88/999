@@ -1,10 +1,17 @@
-// https://www.pilio.idv.tw/ 順球
 const fs = require('fs');
 const axios = require('axios');
 const iconv = require('iconv-lite');
 
 async function main() {
-    console.log(`[${new Date().toISOString()}] 開始執行 vvv.js 更新檢查...`);
+    const now = new Date();
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const twTime = new Date(utc + (3600000 * 8));
+    
+    const hours = twTime.getHours();
+    const minutes = twTime.getMinutes();
+    const totalMins = hours * 60 + minutes;
+
+    console.log(`[${twTime.toISOString()}] 開始執行 vvv.js 更新檢查... 台灣時間 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
 
     let content = '';
     try {
@@ -24,22 +31,47 @@ async function main() {
     let topRecord = records[0];
     let topDate = topRecord[0];
 
-    let targetDate = getTargetDrawDate();
+    let targetDate = getTargetDrawDate(twTime);
     console.log(`目標日期: ${targetDate}，vvv.js 目前首列日期: ${topDate}`);
 
-    let drop = await fetchLotteryDrop();
-    if (!drop || drop.length !== 5) {
-        console.log(`[${targetDate}] 官方尚未開獎或落球資料不完全。`);
+    // 判斷時段決定要抓「順球」還是「落球」
+    // 20:45 (1245分鐘) 之後抓落球，其餘抓順球
+    let isDropTime = totalMins >= 1245; 
+    let numbers = null;
+    let modeName = '';
+
+    if (isDropTime) {
+        modeName = '落球 (9800)';
+        numbers = await fetch9800Drop(targetDate);
+    } else {
+        modeName = '順球 (Pilio)';
+        numbers = await fetchPilioShun();
+    }
+
+    if (!numbers || numbers.length !== 5) {
+        console.log(`[${targetDate}] 官方尚未開獎或 ${modeName} 資料不完全。`);
         return;
     }
 
-    // 核心邏輯：若首列日期小於目標日期，直接在最上方 unshift 插入新一期
+    // 核心邏輯：若是落球時間，直接更新/替換首列；若是順球時間且日期不同則 unshift 插入
     if (topDate < targetDate) {
-        records.unshift([targetDate, drop]);
-        console.log(`[新增首列] 成功插入 ${targetDate} 順球/落球序: [${drop.join(',')}]`);
+        if (isDropTime) {
+            // 如果到了落球時間但首列還是舊日期的話，直接插入落球
+            records.unshift([targetDate, numbers]);
+            console.log(`[新增首列 - ${modeName}] 成功插入 ${targetDate}: [${numbers.join(',')}]`);
+        } else {
+            records.unshift([targetDate, numbers]);
+            console.log(`[新增首列 - ${modeName}] 成功插入 ${targetDate}: [${numbers.join(',')}]`);
+        }
     } else if (topDate === targetDate) {
-        topRecord[1] = drop;
-        console.log(`[更新首列] 成功替換 ${targetDate} 順球/落球序: [${drop.join(',')}]`);
+        if (isDropTime) {
+            // 用落球替換當天的順球
+            topRecord[1] = numbers;
+            console.log(`[替換為落球 - ${modeName}] 成功更新 ${targetDate} 為落球: [${numbers.join(',')}]`);
+        } else {
+            console.log(`[跳過] 當天 ${targetDate} 的順球已經存在，等待 20:45 後落球替換。`);
+            return;
+        }
     } else {
         console.log('首列日期大於目標日期，無需更新。');
         return;
@@ -56,15 +88,12 @@ async function main() {
     console.log('vvv.js 檔案更新完成！');
 }
 
-function getTargetDrawDate() {
-    let now = new Date();
-    let utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    let twTime = new Date(utc + (3600000 * 8));
-
+function getTargetDrawDate(twTime) {
     let hours = twTime.getHours();
     let minutes = twTime.getMinutes();
     let totalMins = hours * 60 + minutes;
 
+    // 20:40 以前視為尚未到當日開獎時間，目標往前推一天
     if (totalMins < 1240) {
         twTime.setDate(twTime.getDate() - 1);
     }
@@ -78,35 +107,58 @@ function getTargetDrawDate() {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-async function fetchLotteryDrop() {
+// 1. 抓取 Pilio 順球 (大小順序)
+async function fetchPilioShun() {
     try {
         const response = await axios.get('https://www.pilio.idv.tw/', {
             timeout: 10000,
             responseType: 'arraybuffer',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
-
         const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
-
-        // 直接尋找 id="lto539no" 的 span 標籤內容
         const matchNo = htmlText.match(/id="lto539no"[^>]*>([^<]+)</);
-        if (!matchNo || !matchNo[1]) {
-            console.log("找不到 lto539no 標籤");
-            return null;
-        }
+        if (!matchNo || !matchNo[1]) return null;
 
-        // 取得裡面的字串（例如 "02,05,17,28,37"）
         const rawNumbers = matchNo[1].trim();
-        const drop = rawNumbers.split(',').map(n => n.trim().padStart(2, '0'));
+        const nums = rawNumbers.split(',').map(n => n.trim().padStart(2, '0'));
+        if (nums.length === 5) return nums;
+    } catch (e) {
+        console.error('Pilio 抓取錯誤:', e.message);
+    }
+    return null;
+}
 
-        if (drop.length === 5 && drop.every(n => /^\d{2}$/.test(n))) {
-            console.log(`成功抓取當期號碼: [${drop.join(',')}]`);
-            return drop;
+// 2. 抓取 9800 網站的落球 (開出順序)
+async function fetch9800Drop(targetDate) {
+    try {
+        const response = await axios.get('https://www.9800.com.tw/lotto539/drop.html', {
+            timeout: 10000,
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
+        
+        // 尋找包含目標日期的整行 TR，並抓取最後一個綠色欄位（落球序）
+        // 對應您提供的結構：第五欄為落球
+        const datePattern = new RegExp(targetDate.replace(/-/g, '[^\\d]?'), 'g');
+        // 簡單透過正規表達式尋找對應日期的表格列
+        const rows = htmlText.split('<TR');
+        for (let row of rows) {
+            if (row.includes(targetDate)) {
+                // 抓取含有落球的欄位 (通常是最後一個靠右或特定 color="#006600" 的欄位)
+                const matchDrop = row.match(/color="#006600"[^>]*>([^<]+)</);
+                if (matchDrop && matchDrop[1]) {
+                    const rawDrop = matchDrop[1].replace(/&nbsp;/g, ' ').trim();
+                    const nums = rawDrop.split(/\s+/).map(n => n.padStart(2, '0'));
+                    if (nums.length === 5) {
+                        console.log(`成功從 9800 抓取落球: [${nums.join(',')}]`);
+                        return nums;
+                    }
+                }
+            }
         }
     } catch (e) {
-        console.error('Pilio 抓取發生錯誤:', e.message);
+        console.error('9800 抓取錯誤:', e.message);
     }
     return null;
 }
