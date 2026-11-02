@@ -1,36 +1,35 @@
-name: Auto Update vvv.js
+name: Auto Update Lottery
 
 on:
   schedule:
-    - cron: '45 12 * * 1-6'
-    - cron: '00 13 * * 1-6'
-    - cron: '30 13 * * 1-6'
-    - cron: '00 21 * * 1-6'
-  
+    - cron: '0 7 * * 1-6'   # 台灣時間 15:00 測試用
+    - cron: '40 12 * * 1-6' # 台灣時間 20:35 正式開獎用
   workflow_dispatch:
 
 jobs:
-  update-lottery:
+  update:
     runs-on: ubuntu-latest
-    
     permissions:
       contents: write
-
     steps:
-      - name: 1. 取得專案程式碼
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: 2. 設定 Node.js 環境
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
-      - name: 3. 執行 vvv.js 更新腳本
+      - name: Install dependencies
+        run: npm install axios iconv-lite
+
+      - name: Run update script
         run: node update.js
 
-      - name: 4. 自動提交並推送到 GitHub
+      - name: Commit and push if changed
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "Auto Bot"
+          git config --global user.email "bot@users.noreply.github.com"
           git add vvv.js
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update vvv.js drop data [skip ci]" && git push)
+          git commit -m "Auto-update vvv.js" || echo "沒有變更需要提交"
+          git push
