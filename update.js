@@ -1,4 +1,6 @@
 const fs = require('fs');
+const axios = require('axios');
+const iconv = require('iconv-lite');
 
 async function main() {
     console.log(`[${new Date().toISOString()}] 開始執行 vvv.js 更新檢查...`);
@@ -22,7 +24,7 @@ async function main() {
     let topDate = topRecord[0];
 
     let targetDate = getTargetDrawDate();
-    console.log(`目標日期: ${targetDate}，vvv.js 首列日期: ${topDate}`);
+    console.log(`目標日期: ${targetDate}，vvv.js 目前首列日期: ${topDate}`);
 
     let drop = await fetchLotteryDrop(targetDate);
     if (!drop || drop.length !== 5) {
@@ -30,12 +32,13 @@ async function main() {
         return;
     }
 
+    // 核心邏輯：若首列日期小於目標日期，直接在最上方 unshift 插入新一期
     if (topDate < targetDate) {
         records.unshift([targetDate, drop]);
-        console.log(`[新增首列] 成功插入 ${targetDate} 落球序: [${drop.join(',')}]`);
+        console.log(`[新增首列] 成功插入 ${targetDate} 順球/落球序: [${drop.join(',')}]`);
     } else if (topDate === targetDate) {
         topRecord[1] = drop;
-        console.log(`[更新首列] 成功替換 ${targetDate} 落球序: [${drop.join(',')}]`);
+        console.log(`[更新首列] 成功替換 ${targetDate} 順球/落球序: [${drop.join(',')}]`);
     } else {
         console.log('首列日期大於目標日期，無需更新。');
         return;
@@ -76,21 +79,28 @@ function getTargetDrawDate() {
 
 async function fetchLotteryDrop(targetDate) {
     try {
-        const res = await fetch('http://www.9800.com.tw/lotto539/drop.html');
-        const text = await res.text();
+        const response = await axios.get('https://www.pilio.idv.tw/lto539/list.asp', {
+            timeout: 10000,
+            responseType: 'arraybuffer',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
 
-        let dateIdx = text.indexOf(targetDate);
-        let searchKey = targetDate;
+        const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
 
+        const [y, m, d] = targetDate.split('-');
+        const mingGuoYear = parseInt(y, 10) - 1911;
+        const searchKey1 = targetDate;
+        const searchKey2 = `${mingGuoYear}/${parseInt(m, 10)}/${parseInt(d, 10)}`;
+
+        let dateIdx = htmlText.indexOf(searchKey1);
         if (dateIdx === -1) {
-            const [y, m, d] = targetDate.split('-');
-            const mingGuoYear = parseInt(y) - 1911;
-            searchKey = `${mingGuoYear}/${m}/${d}`;
-            dateIdx = text.indexOf(searchKey);
-            if (dateIdx === -1) return null;
+            dateIdx = htmlText.indexOf(searchKey2);
         }
+        if (dateIdx === -1) return null;
 
-        const subText = text.substring(dateIdx + searchKey.length, dateIdx + searchKey.length + 300);
+        const subText = htmlText.substring(dateIdx, dateIdx + 400);
         const matches = subText.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
 
         if (!matches || matches.length < 5) return null;
@@ -100,7 +110,7 @@ async function fetchLotteryDrop(targetDate) {
             return drop;
         }
     } catch (e) {
-        console.error('抓取發生錯誤:', e.message);
+        console.error('Pilio 抓取發生錯誤:', e.message);
     }
     return null;
 }
