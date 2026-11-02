@@ -26,7 +26,7 @@ async function main() {
     let targetDate = getTargetDrawDate();
     console.log(`目標日期: ${targetDate}，vvv.js 目前首列日期: ${topDate}`);
 
-    let drop = await fetchLotteryDrop(targetDate);
+    let drop = await fetchLotteryDrop();
     if (!drop || drop.length !== 5) {
         console.log(`[${targetDate}] 官方尚未開獎或落球資料不完全。`);
         return;
@@ -77,9 +77,9 @@ function getTargetDrawDate() {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-async function fetchLotteryDrop(targetDate) {
+async function fetchLotteryDrop() {
     try {
-        const response = await axios.get('https://www.pilio.idv.tw/lto539/list.asp', {
+        const response = await axios.get('https://www.pilio.idv.tw/', {
             timeout: 10000,
             responseType: 'arraybuffer',
             headers: {
@@ -89,24 +89,19 @@ async function fetchLotteryDrop(targetDate) {
 
         const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
 
-        const [y, m, d] = targetDate.split('-');
-        const mingGuoYear = parseInt(y, 10) - 1911;
-        const searchKey1 = targetDate;
-        const searchKey2 = `${mingGuoYear}/${parseInt(m, 10)}/${parseInt(d, 10)}`;
-
-        let dateIdx = htmlText.indexOf(searchKey1);
-        if (dateIdx === -1) {
-            dateIdx = htmlText.indexOf(searchKey2);
+        // 直接尋找 id="lto539no" 的 span 標籤內容
+        const matchNo = htmlText.match(/id="lto539no"[^>]*>([^<]+)</);
+        if (!matchNo || !matchNo[1]) {
+            console.log("找不到 lto539no 標籤");
+            return null;
         }
-        if (dateIdx === -1) return null;
 
-        const subText = htmlText.substring(dateIdx, dateIdx + 400);
-        const matches = subText.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
+        // 取得裡面的字串（例如 "02,05,17,28,37"）
+        const rawNumbers = matchNo[1].trim();
+        const drop = rawNumbers.split(',').map(n => n.trim().padStart(2, '0'));
 
-        if (!matches || matches.length < 5) return null;
-
-        let drop = matches.slice(0, 5).map(n => n.padStart(2, '0'));
-        if (drop.length === 5) {
+        if (drop.length === 5 && drop.every(n => /^\d{2}$/.test(n))) {
+            console.log(`成功抓取當期號碼: [${drop.join(',')}]`);
             return drop;
         }
     } catch (e) {
