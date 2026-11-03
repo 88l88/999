@@ -4,26 +4,22 @@ const iconv = require('iconv-lite');
 
 async function main() {
     const now = new Date();
-    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const twTime = new Date(utc + (3600000 * 8));
-    
+    const twTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + (3600000 * 8));
     const hours = twTime.getHours();
     const minutes = twTime.getMinutes();
     const totalMins = hours * 60 + minutes;
-
-    console.log(`[${twTime.toISOString()}] 開始執行 vvv.js 更新檢查... 台灣時間 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`);
 
     let content = '';
     try {
         content = fs.readFileSync('./vvv.js', 'utf8');
     } catch (e) {
-        console.error('無法讀取 vvv.js:', e.message);
+        console.error('無法讀取 vvv.js');
         process.exit(1);
     }
 
-    const match = content.match(/var\s+vvv\s*=\s*(\[[\s\S]*\]);?/);
+    let match = content.match(/var\s+vvv\s*=\s*(\[[\s\S]*\]);?/);
     if (!match) {
-        console.error('vvv.js 格式解析失敗');
+        console.error('vvv.js 格式錯誤');
         process.exit(1);
     }
 
@@ -31,123 +27,97 @@ async function main() {
     let topRecord = records[0];
     let topDate = topRecord[0];
 
-    let targetDate = getTargetDrawDate(twTime);
-    console.log(`目標日期: ${targetDate}，vvv.js 目前首列日期: ${topDate}`);
+    let targetDate = getTargetDate(twTime);
 
-    // 20:45 (1245分鐘) 之後抓 9800 落球，其餘抓 Pilio 順球
-    let isDropTime = totalMins >= 1245; 
-    let numbers = null;
-    let modeName = '';
-
-    if (isDropTime) {
-        modeName = '落球 (9800)';
-        numbers = await fetch9800Drop(targetDate);
-    } else {
-        modeName = '順球 (Pilio)';
-        numbers = await fetchPilioShun();
-    }
-
-    if (!numbers || numbers.length !== 5) {
-        console.log(`[${targetDate}] 官方尚未開獎或 ${modeName} 資料不完全。`);
-        return;
-    }
-
-    if (topDate < targetDate) {
-        records.unshift([targetDate, numbers]);
-        console.log(`[新增首列 - ${modeName}] 成功插入 ${targetDate}: [${numbers.join(',')}]`);
-    } else if (topDate === targetDate) {
-        if (isDropTime) {
-            topRecord[1] = numbers;
-            console.log(`[替換為落球 - ${modeName}] 成功更新 ${targetDate} 為落球: [${numbers.join(',')}]`);
-        } else {
-            console.log(`[跳過] 當天 ${targetDate} 的順球已經存在，等待 20:45 後落球替換。`);
+    // 階段一：20:40 順球（只抓一次，若當天已存在或抓到就寫入並收工）
+    if (totalMins >= 1240 && totalMins < 1260) {
+        if (topDate === targetDate) {
+            console.log("當天順球已存在，略過。");
             return;
         }
-    } else {
-        console.log('首列日期大於目標日期，無需更新。');
+        let numbers = await fetchPilioShun(targetDate);
+        if (numbers && numbers.length === 5) {
+            records.unshift([targetDate, numbers]);
+            saveFile(records);
+            console.log("順球寫入成功，今日順球結束。");
+        } else {
+            console.log("順球尚未公佈或抓取失敗。");
+        }
         return;
     }
 
-    let rows = records.map(r => {
-        let dateStr = r[0];
-        let ballsStr = r[1].map(n => `'${n}'`).join(',');
-        return `['${dateStr}',[${ballsStr}]]`;
-    }).join(',\n');
-
-    let newContent = `var vvv = [\n${rows}\n];\n`;
-    fs.writeFileSync('./vvv.js', newContent, 'utf8');
-    console.log('vvv.js 檔案更新完成！');
+    // 階段二：21:00 起每30分鐘抓落球，成功替換後即結束
+    if (totalMins >= 1260) {
+        // 檢查如果首列已經是落球格式（或是您可以用其他方式標記，這裡直接去抓落球來覆蓋當日順球）
+        let numbers = await fetch9800Drop(targetDate);
+        if (numbers && numbers.length === 5) {
+            if (topDate === targetDate) {
+                topRecord[1] = numbers; // 替換成落球
+            } else {
+                records.unshift([targetDate, numbers]); // 若還沒順球直接補落球
+            }
+            saveFile(records);
+            console.log("落球替換成功，關閉後續落球動作。");
+            return;
+        } else {
+            console.log("落球尚未公佈，等待下個排程再試。");
+        }
+    }
 }
 
-function getTargetDrawDate(twTime) {
-    let hours = twTime.getHours();
-    let minutes = twTime.getMinutes();
-    let totalMins = hours * 60 + minutes;
-
-    if (totalMins < 1240) {
-        twTime.setDate(twTime.getDate() - 1);
-    }
-    if (twTime.getDay() === 0) {
-        twTime.setDate(twTime.getDate() - 1);
-    }
-
+function getTargetDate(twTime) {
     let yyyy = twTime.getFullYear();
     let mm = String(twTime.getMonth() + 1).padStart(2, '0');
     let dd = String(twTime.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
 }
 
-// 1. 抓取 Pilio 順球
-async function fetchPilioShun() {
+async function fetchPilioShun(targetDate) {
     try {
-        const response = await axios.get('https://www.pilio.idv.tw/', {
-            timeout: 10000,
+        const res = await axios.get('https://www.pilio.idv.tw/lotto539/list.asp', {
             responseType: 'arraybuffer',
             headers: { 'User-Agent': 'Mozilla/5.0' }
         });
-        const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
-        const matchNo = htmlText.match(/id="lto539no"[^>]*>([^<]+)</);
-        if (!matchNo || !matchNo[1]) return null;
-
-        const rawNumbers = matchNo[1].trim();
-        const nums = rawNumbers.split(',').map(n => n.trim().padStart(2, '0'));
-        if (nums.length === 5) return nums;
-    } catch (e) {
-        console.error('Pilio 抓取錯誤:', e.message);
-    }
-    return null;
-}
-
-// 2. 抓取 9800 網站的落球 (根據您提供的 TR 結構精準解析)
-async function fetch9800Drop(targetDate) {
-    try {
-        const response = await axios.get('https://www.9800.com.tw/lotto539/drop.html', {
-            timeout: 10000,
-            responseType: 'arraybuffer',
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
-        
-        const rows = htmlText.split('<TR');
+        const html = iconv.decode(Buffer.from(res.data), 'big5');
+        const rows = html.split('</tr>');
+        let targetMD = targetDate.substring(5).replace('-', '/');
         for (let row of rows) {
-            // 比對日期
-            if (row.includes(targetDate)) {
-                // 抓取綠色字 color="#006600" 的落球欄位
-                const matchDrop = row.match(/color="#006600"[^>]*>([^<]+)</);
-                if (matchDrop && matchDrop[1]) {
-                    const rawDrop = matchDrop[1].replace(/&nbsp;/g, ' ').trim();
-                    const nums = rawDrop.split(/\s+/).map(n => n.padStart(2, '0'));
-                    if (nums.length === 5) {
-                        console.log(`成功從 9800 抓取落球: [${nums.join(',')}]`);
-                        return nums;
-                    }
+            if (row.includes(targetMD)) {
+                const m = row.match(/class="number-cell"[^>]*>([\s\S]*?)<\/td>/);
+                if (m) {
+                    let nums = m[1].replace(/<[^>]+>/g, '').split(',').map(n => n.trim().padStart(2, '0'));
+                    if (nums.length === 5) return nums;
                 }
             }
         }
-    } catch (e) {
-        console.error('9800 抓取錯誤:', e.message);
-    }
+    } catch (e) {}
     return null;
+}
+
+async function fetch9800Drop(targetDate) {
+    try {
+        const res = await axios.get('https://www.9800.com.tw/lotto539/drop.html', {
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        const html = iconv.decode(Buffer.from(res.data), 'big5');
+        const rows = html.split('<TR');
+        for (let row of rows) {
+            if (row.includes(targetDate)) {
+                const m = row.match(/color="#FF0000"[^>]*>([\s\S]*?)<\/font>/);
+                if (m) {
+                    let nums = m[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().split(/\s+/).map(n => n.padStart(2, '0'));
+                    if (nums.length === 5) return nums;
+                }
+            }
+        }
+    } catch (e) {}
+    return null;
+}
+
+function saveFile(records) {
+    let rows = records.map(r => `['${r[0]}',[${r[1].map(n => `'${n}'`).join(',')}]]`).join(',\n');
+    fs.writeFileSync('./vvv.js', `var vvv=[\n${rows}\n];\n`, 'utf8');
 }
 
 main();
