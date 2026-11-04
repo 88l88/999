@@ -1,19 +1,19 @@
 const fs = require('fs');
 
 async function main() {
-    console.log(`[${new Date().toISOString()}] 開始執行 7788.js 更新檢查...`);
+    console.log(`[${new Date().toISOString()}] 開始執行 vvv.js 更新檢查...`);
 
     let content = '';
     try {
-        content = fs.readFileSync('./7788.js', 'utf8');
+        content = fs.readFileSync('./vvv.js', 'utf8');
     } catch (e) {
-        console.error('無法讀取 7788.js:', e.message);
+        console.error('無法讀取 vvv.js:', e.message);
         process.exit(1);
     }
 
-    const match = content.match(/var\s+7788\s*=\s*(\[[\s\S]*\]);?/);
+    const match = content.match(/var\s+vvv\s*=\s*(\[[\s\S]*\]);?/);
     if (!match) {
-        console.error('7788.js 格式解析失敗');
+        console.error('vvv.js 格式解析失敗');
         process.exit(1);
     }
 
@@ -22,7 +22,7 @@ async function main() {
     let topDate = topRecord[0];
 
     let targetDate = getTargetDrawDate();
-    console.log(`目標日期: ${targetDate}，7788.js 首列日期: ${topDate}`);
+    console.log(`目標日期: ${targetDate}，vvv.js 首列日期: ${topDate}`);
 
     let shun = await fetchLotteryShun(targetDate);
     if (!shun || shun.length !== 5) {
@@ -52,9 +52,9 @@ async function main() {
         return `['${dateStr}',[${shunStr}]]`;
     }).join(',\n');
 
-    let newContent = `var 7788 = [\n${rows}\n];\n`;
-    fs.writeFileSync('./7788.js', newContent, 'utf8');
-    console.log('7788.js 檔案更新完成！');
+    let newContent = `var vvv = [\n${rows}\n];\n`;
+    fs.writeFileSync('./vvv.js', newContent, 'utf8');
+    console.log('vvv.js 檔案更新完成！');
 }
 
 function getTargetDrawDate() {
