@@ -3,23 +3,19 @@ const axios = require('axios');
 const iconv = require('iconv-lite');
 
 async function main() {
-    const now = new Date();
-    const twTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + (3600000 * 8));
-    const hours = twTime.getHours();
-    const minutes = twTime.getMinutes();
-    const totalMins = hours * 60 + minutes;
+    console.log(`[${new Date().toISOString()}] 開始執行 vvv.js 更新檢查...`);
 
     let content = '';
     try {
         content = fs.readFileSync('./vvv.js', 'utf8');
     } catch (e) {
-        console.error('無法讀取 vvv.js');
+        console.error('無法讀取 vvv.js:', e.message);
         process.exit(1);
     }
 
-    let match = content.match(/var\s+vvv\s*=\s*(\[[\s\S]*\]);?/);
+    const match = content.match(/var\s+vvv\s*=\s*(\[[\s\S]*\]);?/);
     if (!match) {
-        console.error('vvv.js 格式錯誤');
+        console.error('vvv.js 格式解析失敗');
         process.exit(1);
     }
 
@@ -27,97 +23,96 @@ async function main() {
     let topRecord = records[0];
     let topDate = topRecord[0];
 
-    let targetDate = getTargetDate(twTime);
+    let targetDate = getTargetDrawDate();
+    console.log(`目標日期: ${targetDate}，vvv.js 目前首列日期: ${topDate}`);
 
-    // 階段一：20:40 順球（只抓一次，若當天已存在或抓到就寫入並收工）
-    if (totalMins >= 1240 && totalMins < 1260) {
-        if (topDate === targetDate) {
-            console.log("當天順球已存在，略過。");
-            return;
-        }
-        let numbers = await fetchPilioShun(targetDate);
-        if (numbers && numbers.length === 5) {
-            records.unshift([targetDate, numbers]);
-            saveFile(records);
-            console.log("順球寫入成功，今日順球結束。");
-        } else {
-            console.log("順球尚未公佈或抓取失敗。");
-        }
+    let drop = await fetchLotteryDrop(targetDate);
+    if (!drop || drop.length !== 5) {
+        console.log(`[${targetDate}] 官方尚未開獎或落球資料不完全。`);
         return;
     }
 
-    // 階段二：21:00 起每30分鐘抓落球，成功替換後即結束
-    if (totalMins >= 1260) {
-        // 檢查如果首列已經是落球格式（或是您可以用其他方式標記，這裡直接去抓落球來覆蓋當日順球）
-        let numbers = await fetch9800Drop(targetDate);
-        if (numbers && numbers.length === 5) {
-            if (topDate === targetDate) {
-                topRecord[1] = numbers; // 替換成落球
-            } else {
-                records.unshift([targetDate, numbers]); // 若還沒順球直接補落球
-            }
-            saveFile(records);
-            console.log("落球替換成功，關閉後續落球動作。");
-            return;
-        } else {
-            console.log("落球尚未公佈，等待下個排程再試。");
-        }
+    // 核心邏輯：若首列日期小於目標日期，直接在最上方 unshift 插入新一期
+    if (topDate < targetDate) {
+        records.unshift([targetDate, drop]);
+        console.log(`[新增首列] 成功插入 ${targetDate} 順球/落球序: [${drop.join(',')}]`);
+    } else if (topDate === targetDate) {
+        topRecord[1] = drop;
+        console.log(`[更新首列] 成功替換 ${targetDate} 順球/落球序: [${drop.join(',')}]`);
+    } else {
+        console.log('首列日期大於目標日期，無需更新。');
+        return;
     }
+
+    let rows = records.map(r => {
+        let dateStr = r[0];
+        let ballsStr = r[1].map(n => `'${n}'`).join(',');
+        return `['${dateStr}',[${ballsStr}]]`;
+    }).join(',\n');
+
+    let newContent = `var vvv = [\n${rows}\n];\n`;
+    fs.writeFileSync('./vvv.js', newContent, 'utf8');
+    console.log('vvv.js 檔案更新完成！');
 }
 
-function getTargetDate(twTime) {
+function getTargetDrawDate() {
+    let now = new Date();
+    let utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    let twTime = new Date(utc + (3600000 * 8));
+
+    let hours = twTime.getHours();
+    let minutes = twTime.getMinutes();
+    let totalMins = hours * 60 + minutes;
+
+    if (totalMins < 1240) {
+        twTime.setDate(twTime.getDate() - 1);
+    }
+    if (twTime.getDay() === 0) {
+        twTime.setDate(twTime.getDate() - 1);
+    }
+
     let yyyy = twTime.getFullYear();
     let mm = String(twTime.getMonth() + 1).padStart(2, '0');
     let dd = String(twTime.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
 }
 
-async function fetchPilioShun(targetDate) {
+async function fetchLotteryDrop(targetDate) {
     try {
-        const res = await axios.get('https://www.pilio.idv.tw/lotto539/list.asp', {
+        const response = await axios.get('https://www.pilio.idv.tw/lto539/list.asp', {
+            timeout: 10000,
             responseType: 'arraybuffer',
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        const html = iconv.decode(Buffer.from(res.data), 'big5');
-        const rows = html.split('</tr>');
-        let targetMD = targetDate.substring(5).replace('-', '/');
-        for (let row of rows) {
-            if (row.includes(targetMD)) {
-                const m = row.match(/class="number-cell"[^>]*>([\s\S]*?)<\/td>/);
-                if (m) {
-                    let nums = m[1].replace(/<[^>]+>/g, '').split(',').map(n => n.trim().padStart(2, '0'));
-                    if (nums.length === 5) return nums;
-                }
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
-        }
-    } catch (e) {}
-    return null;
-}
-
-async function fetch9800Drop(targetDate) {
-    try {
-        const res = await axios.get('https://www.9800.com.tw/lotto539/drop.html', {
-            responseType: 'arraybuffer',
-            headers: { 'User-Agent': 'Mozilla/5.0' }
         });
-        const html = iconv.decode(Buffer.from(res.data), 'big5');
-        const rows = html.split('<TR');
-        for (let row of rows) {
-            if (row.includes(targetDate)) {
-                const m = row.match(/color="#FF0000"[^>]*>([\s\S]*?)<\/font>/);
-                if (m) {
-                    let nums = m[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim().split(/\s+/).map(n => n.padStart(2, '0'));
-                    if (nums.length === 5) return nums;
-                }
-            }
-        }
-    } catch (e) {}
-    return null;
-}
 
-function saveFile(records) {
-    let rows = records.map(r => `['${r[0]}',[${r[1].map(n => `'${n}'`).join(',')}]]`).join(',\n');
-    fs.writeFileSync('./vvv.js', `var vvv=[\n${rows}\n];\n`, 'utf8');
+        const htmlText = iconv.decode(Buffer.from(response.data), 'big5');
+
+        const [y, m, d] = targetDate.split('-');
+        const mingGuoYear = parseInt(y, 10) - 1911;
+        const searchKey1 = targetDate;
+        const searchKey2 = `${mingGuoYear}/${parseInt(m, 10)}/${parseInt(d, 10)}`;
+
+        let dateIdx = htmlText.indexOf(searchKey1);
+        if (dateIdx === -1) {
+            dateIdx = htmlText.indexOf(searchKey2);
+        }
+        if (dateIdx === -1) return null;
+
+        const subText = htmlText.substring(dateIdx, dateIdx + 400);
+        const matches = subText.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
+
+        if (!matches || matches.length < 5) return null;
+
+        let drop = matches.slice(0, 5).map(n => n.padStart(2, '0'));
+        if (drop.length === 5) {
+            return drop;
+        }
+    } catch (e) {
+        console.error('Pilio 抓取發生錯誤:', e.message);
+    }
+    return null;
 }
 
 main();
