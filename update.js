@@ -1,95 +1,60 @@
 const fs = require('fs');
-const { Octokit } = require("@octokit/rest");
-
-// 初始化 Octokit (讀取環境變數中的跨庫寫入 PAT)
-const octokit = new Octokit({ auth: process.env.GH_PAT });
-
-// 設定您要同時同步更新的所有目標檔案清單
-const TARGET_FILES = [
-  { owner: '88ll88', repo: '999', path: 'vvv.js', varName: 'vvv' },
-  { owner: '88ll88', repo: '888', path: 'ddd.js', varName: 'ddd' },
-  { owner: '88l88',  repo: '888', path: 'ddd.js', varName: 'ddd' }
-];
 
 async function main() {
-    console.log(`[${new Date().toISOString()}] 開始執行多庫開獎號碼更新檢查...`);
+    console.log(`[${new Date().toISOString()}] 開始執行 vvv.js 更新檢查...`);
 
-    // 1. 先從當前本地 (或透過網路) 取得最新的順球與目標日期
+    let content = '';
+    try {
+        content = fs.readFileSync('./vvv.js', 'utf8');
+    } catch (e) {
+        console.error('無法讀取 vvv.js:', e.message);
+        process.exit(1);
+    }
+
+    const match = content.match(/var\s+vvv\s*=\s*(\[[\s\S]*\]);?/);
+    if (!match) {
+        console.error('vvv.js 格式解析失敗');
+        process.exit(1);
+    }
+
+    let records = eval('(' + match[1] + ')');
+    let topRecord = records[0];
+    let topDate = topRecord[0];
+
     let targetDate = getTargetDrawDate();
+    console.log(`目標日期: ${targetDate}，vvv.js 首列日期: ${topDate}`);
+
     let shun = await fetchLotteryShun(targetDate);
-    
     if (!shun || shun.length !== 5) {
-        console.log(`[${targetDate}] 官方時尚未開獎或順球資料不完全，本次略過。`);
+        console.log(`[${targetDate}] 官方時尚未開獎或順球資料不完全。`);
         return;
     }
-    console.log(`目標日期: ${targetDate}，成功抓取順球: [${shun.join(',')}]`);
 
-    // 2. 依次更新清單中的每一個 GitHub 倉庫檔案
-    for (const target of TARGET_FILES) {
-        await updateSingleRepository(target, targetDate, shun);
+    // 邏輯判斷：
+    // 1. 若首列日期小於目標日期（落後兩期以上）：插入新列 ['日期', ['順球']]
+    if (topDate < targetDate) {
+        records.unshift([targetDate, shun]);
+        console.log(`[兩期以上未更新] 插入新首列: ${targetDate} [${shun.join(',')}]`);
+    } 
+    // 2. 若首列日期剛好等於目標日期：直接替換首列的順球（落球直接對應順球）
+    else if (topDate === targetDate) {
+        topRecord[1] = shun;
+        console.log(`[一期未更新/更新首列] 成功替換 ${targetDate} 順球: [${shun.join(',')}]`);
+    } else {
+        console.log('首列日期大於目標日期，無需更新。');
+        return;
     }
-}
 
-/**
- * 處理單一遠端倉庫檔案的讀取、比對、插入與 Push
- */
-async function updateSingleRepository(target, targetDate, shun) {
-    const { owner, repo, path, varName } = target;
-    console.log(`正在處理目標: ${owner}/${repo}/${path} ...`);
+    // 嚴格格式化輸出（只輸出兩欄結構：日期與順球）
+    let rows = records.map(r => {
+        let dateStr = r[0];
+        let shunStr = r[1].map(n => `'${n}'`).join(',');
+        return `['${dateStr}',[${shunStr}]]`;
+    }).join(',\n');
 
-    try {
-        // 取得遠端檔案內容與 SHA
-        const res = await octokit.repos.getContent({ owner, repo, path });
-        const content = Buffer.from(res.data.content, 'base64').toString('utf-8');
-        const sha = res.data.sha;
-
-        // 解析變數陣列
-        const regex = new RegExp(`var\\s+${varName}\\s*=\\s*(\\[[\\s\\S]*\\]);?`);
-        const match = content.match(regex);
-        if (!match) {
-            console.error(`[${owner}/${repo}/${path}] 格式解析失敗，找不到變數 ${varName}`);
-            return;
-        }
-
-        let records = eval('(' + match[1] + ')');
-        let topRecord = records[0];
-        let topDate = topRecord[0];
-
-        // 邏輯判斷
-        if (topDate < targetDate) {
-            records.unshift([targetDate, shun]);
-            console.log(`[${owner}/${repo}] 兩期以上未更新，插入新首列: ${targetDate}`);
-        } else if (topDate === targetDate) {
-            topRecord[1] = shun;
-            console.log(`[${owner}/${repo}] 替換首列 ${targetDate} 順球資料`);
-        } else {
-            console.log(`[${owner}/${repo}] 首列日期大於目標日期，無需更新。`);
-            return;
-        }
-
-        // 格式化輸出
-        let rows = records.map(r => {
-            let dateStr = r[0];
-            let shunStr = r[1].map(n => `'${n}'`).join(',');
-            return `  ['${dateStr}',[${shunStr}]]`;
-        }).join(',\n');
-
-        let newContent = `var ${varName} = [\n${rows}\n];\n`;
-
-        // Push 回 GitHub
-        await octokit.repos.createOrUpdateFileContents({
-            owner,
-            repo,
-            path,
-            message: `auto: update ${path} for ${targetDate}`,
-            content: Buffer.from(newContent).toString('utf-8'),
-            sha: sha
-        });
-
-        console.log(`[成功] 已成功更新並推送至 ${owner}/${repo}/${path}`);
-    } catch (e) {
-        console.error(`[錯誤] 更新 ${owner}/${repo}/${path} 失敗:`, e.message);
-    }
+    let newContent = `var vvv = [\n${rows}\n];\n`;
+    fs.writeFileSync('./vvv.js', newContent, 'utf8');
+    console.log('vvv.js 檔案更新完成！');
 }
 
 function getTargetDrawDate() {
