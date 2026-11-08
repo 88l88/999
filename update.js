@@ -6,13 +6,13 @@ const octokit = new Octokit({ auth: process.env.GH_PAT });
 const TARGET_FILES = [
   { owner: '88ll88', repo: '999', path: 'vvv.js', varName: 'vvv' },
   { owner: '88ll88', repo: '888', path: 'ddd.js', varName: 'ddd' },
-  { owner: '88l88',  repo: '999', path: 'vvv.js', varName: 'vvv' }
+  { owner: '88l88',  repo: '999', path: 'vvv.js', varName: 'vvv' },
   { owner: '88l88',  repo: '888', path: 'ddd.js', varName: 'ddd' }
 ];
 
 async function main() {
     console.log(`[${new Date().toISOString()}] 開始執行更新檢查...`);
-    let targetDate = getTargetDrawDate();
+    let targetDate = "2026-11-07"; // 或使用 getTargetDrawDate()
     let shun = await fetchLotteryShun(targetDate);
     
     if (!shun || shun.length !== 5) {
@@ -55,13 +55,16 @@ async function updateSingleRepository(target, targetDate, shun) {
         }).join(',\n');
 
         let newContent = `var ${varName} = [\n${rows}\n];\n`;
+        
+        // 修正：必須轉換為標準的 Base64 編碼
+        let encodedContent = Buffer.from(newContent, 'utf-8').toString('base64');
 
         await octokit.repos.createOrUpdateFileContents({
             owner,
             repo,
             path,
             message: `auto: update ${path} for ${targetDate}`,
-            content: Buffer.from(newContent).toString('utf-8'),
+            content: encodedContent,
             sha: sha
         });
         console.log(`[成功] 已更新 ${owner}/${repo}/${path}`);
