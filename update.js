@@ -179,6 +179,7 @@ async function fetchShunPilio(targetDate) {
     return null;
 }
 
+// 修正：精準抓取 9800 網站表格中對應落球序的欄位號碼
 async function fetchLuoqiu9800(targetDate) {
     try {
         let res = await fetch('http://www.9800.com.tw/lotto539/');
@@ -193,11 +194,18 @@ async function fetchLuoqiu9800(targetDate) {
         }
         if (idx === -1) return null;
 
-        let sub = text.substring(idx, idx + 400);
-        let matches = sub.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
-        if (matches && matches.length >= 10) {
-            let luoqiu = matches.slice(5, 10);
-            if (luoqiu.length === 5) return luoqiu;
+        // 從找到的日期行開始往後擷取一段表格 HTML
+        let sub = text.substring(idx, idx + 800);
+        
+        // 切割出所有的 <td> 欄位
+        let tds = sub.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+        if (tds && tds.length >= 4) {
+            // 第四個 <td> 包含落球序號碼
+            let fourthTdContent = tds[3];
+            let matches = fourthTdContent.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
+            if (matches && matches.length >= 5) {
+                return matches.slice(0, 5);
+            }
         }
     } catch (e) {}
     return null;
