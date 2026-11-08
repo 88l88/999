@@ -6,6 +6,7 @@ const octokit = new Octokit({ auth: process.env.GH_PAT });
 const TARGET_FILES = [
   { owner: '88ll88', repo: '999', path: 'vvv.js', varName: 'vvv' },
   { owner: '88ll88', repo: '888', path: 'ddd.js', varName: 'ddd' },
+  { owner: '88l88',  repo: '999', path: 'vvv.js', varName: 'vvv' }
   { owner: '88l88',  repo: '888', path: 'ddd.js', varName: 'ddd' }
 ];
 
