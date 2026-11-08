@@ -30,8 +30,8 @@ async function main() {
 async function updateSingleRepository(target, targetDate, shun) {
     const { owner, repo, path, varName } = target;
     // 依據擁有者自動切換對應的 Octokit 實例
-    const activeOctokit = (owner === '88l88') ? octokit88l88 : octokit88ll88;
-
+    const activeOctokit = (owner === '88ll88') ? octokit88ll88 : octokit88l88;
+  
     try {
         const res = await activeOctokit.repos.getContent({ owner, repo, path });
         const content = Buffer.from(res.data.content, 'base64').toString('utf-8');
