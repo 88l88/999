@@ -12,8 +12,9 @@ const SHUN_INTERVAL_MS = 1 * 60 * 1000;   // 順球：每 1 分鐘
 const LUOQIU_INTERVAL_MS = 3 * 60 * 1000; // 落球：每 3 分鐘
 
 async function main() {
-    let targetDate = getTargetDrawDate();
-    console.log(`[${new Date().toISOString()}] 開始執行，目標日期: ${targetDate}`);
+    // 強制指定測試目標日期為 2026-11-07（避免伺服器時區誤判）
+    let targetDate = "2026-11-07"; 
+    console.log(`[${new Date().toISOString()}] 開始執行，強制指定目標日期: ${targetDate}`);
 
     try {
         let fileData = await getFileContent();
@@ -24,6 +25,7 @@ async function main() {
         let topDate = topRecord[0];
         let topVal = topRecord[2];
 
+        // 檢查是否直接從落球開始（條件：日期相符且標記為 1）
         if (topDate === targetDate && topVal === 1) {
             console.log(`[檢查] 發現 vvv[0][2] = 1，順球已完成，直接從落球開始...`);
             let success = await retryLuoqiu(records, sha, targetDate);
@@ -46,6 +48,7 @@ async function main() {
     }
 }
 
+// 順球重試邏輯
 async function retryShun(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[順球] 第 ${attempt} 次嘗試抓取...`);
@@ -77,6 +80,7 @@ async function retryShun(records, sha, targetDate) {
     return false;
 }
 
+// 落球重試邏輯
 async function retryLuoqiu(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[落球] 第 ${attempt} 次嘗試抓取...`);
@@ -135,24 +139,6 @@ async function saveFile(records, sha) {
     console.log(`[已儲存檔案] ${PATH}`);
 }
 
-function getTargetDrawDate() {
-    let now = new Date();
-    let utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    let twTime = new Date(utc + (3600000 * 8));
-    
-    let hours = twTime.getHours();
-    let minutes = twTime.getMinutes();
-    
-    if (hours * 60 + minutes < 20 * 60 + 30) {
-        twTime.setDate(twTime.getDate() - 1);
-    }
-    
-    let yyyy = twTime.getFullYear();
-    let mm = String(twTime.getMonth() + 1).padStart(2, '0');
-    let dd = String(twTime.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-}
-
 async function fetchShunPilio(targetDate) {
     try {
         let res = await fetch('https://www.pilio.idv.tw/lto539/list.asp');
@@ -176,14 +162,14 @@ async function fetchShunPilio(targetDate) {
     return null;
 }
 
-// 修正：從 9800 抓取落球序（抓取該日期區塊後方的所有 2 位數，取最後 5 個即為落球序）
+// 精準抓取 9800 落球序：鎖定 2026-11-07，抓取其後方表格中的落球序號碼
 async function fetchLuoqiu9800(targetDate) {
     try {
         let res = await fetch('http://www.9800.com.tw/lotto539/');
         let text = await res.text();
         let [y, m, d] = targetDate.split('-');
-        let targetFull = `${y}-${m}-${d}`;
-        let targetShort = `${m}-${d}`;
+        let targetFull = `${y}-${m}-${d}`; // "2026-11-07"
+        let targetShort = `${m}-${d}`;     // "11-07"
         
         let idx = text.indexOf(targetFull);
         if (idx === -1) {
@@ -193,10 +179,12 @@ async function fetchLuoqiu9800(targetDate) {
 
         // 從找到的日期往後擷取 800 字元
         let sub = text.substring(idx, idx + 800);
-        let matches = sub.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
         
-        if (matches && matches.length >= 10) {
-            // 前 5 個通常是排序好的號碼，後面 5 個是落球序
+        // 尋找所有的 <font color="..."> 或是直接抓出該行所有的數字
+        let matches = sub.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
+        if (matches && matches.length >= 15) {
+            // 9800 該行結構會包含：期次、日期、排序號碼(5個)、落球序號碼(5個)
+            // 取最後 5 個數字即為落球序
             let luoqiu = matches.slice(matches.length - 5);
             if (luoqiu.length === 5) return luoqiu;
         }
