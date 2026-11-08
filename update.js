@@ -141,7 +141,16 @@ async function saveFile(records, sha) {
 function getTargetDrawDate() {
     let now = new Date();
     let utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    let twTime = new Date(utc + (3600000 * 8));
+    let twTime = new Date(utc + (3600000 * 8)); // 台灣時間
+    
+    let hours = twTime.getHours();
+    let minutes = twTime.getMinutes();
+    
+    // 如果現在時間還沒到晚上 20:30 (1230分鐘)，目標日期必須是「昨天」
+    if (hours * 60 + minutes < 20 * 60 + 30) {
+        twTime.setDate(twTime.getDate() - 1);
+    }
+    
     let yyyy = twTime.getFullYear();
     let mm = String(twTime.getMonth() + 1).padStart(2, '0');
     let dd = String(twTime.getDate()).padStart(2, '0');
