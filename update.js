@@ -24,6 +24,7 @@ async function main() {
         let topDate = topRecord[0];
         let topVal = topRecord[2];
 
+        // 檢查是否直接從落球開始（條件：日期相符且標記為 1）
         if (topDate === targetDate && topVal === 1) {
             console.log(`[檢查] 發現 vvv[0][2] = 1，順球已完成，直接從落球開始...`);
             let success = await retryLuoqiu(records, sha, targetDate);
@@ -46,6 +47,7 @@ async function main() {
     }
 }
 
+// 順球重試邏輯（每 1 分鐘 1 次，最多 3 次）
 async function retryShun(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[順球] 第 ${attempt} 次嘗試抓取...`);
@@ -77,6 +79,7 @@ async function retryShun(records, sha, targetDate) {
     return false;
 }
 
+// 落球重試邏輯（每 3 分鐘 1 次，最多 3 次）
 async function retryLuoqiu(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[落球] 第 ${attempt} 次嘗試抓取...`);
@@ -122,12 +125,14 @@ async function saveFile(records, sha) {
     }).join(',\n');
 
     let newContent = `var ${VAR_NAME} = [\n${rows}\n];\n`;
+    let encodedContent = Buffer.from(newContent, 'utf-8').toString('base64');
+
     await octokit.repos.createOrUpdateFileContents({
         owner: OWNER,
         repo: REPO,
         path: PATH,
         message: `auto: update vvv.js`,
-        content: Buffer.from(newContent).toString('utf-8'),
+        content: encodedContent,
         sha: sha
     });
     console.log(`[已儲存檔案] ${PATH}`);
@@ -151,18 +156,16 @@ function getTargetDrawDate() {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-// 修正：精準抓取 number-cell 裡的 5 個順球號碼
 async function fetchShunPilio(targetDate) {
     try {
         let res = await fetch('https://www.pilio.idv.tw/lto539/list.asp');
         let text = await res.text();
         let [y, m, d] = targetDate.split('-');
-        let targetStr = `${m}/${d}`; // 例如 "11/07"
+        let targetStr = `${m}/${d}`;
         
         let idx = text.indexOf(targetStr);
         if (idx === -1) return null;
 
-        // 從日期位置往後找 number-cell 區塊
         let sub = text.substring(idx, idx + 600);
         let numCellMatch = sub.match(/class="number-cell"[^>]*>([\s\S]*?)<\/td>/);
         if (numCellMatch) {
