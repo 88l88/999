@@ -24,7 +24,6 @@ async function main() {
         let topDate = topRecord[0];
         let topVal = topRecord[2];
 
-        // 檢查是否直接從落球開始（條件：日期相符且標記為 1）
         if (topDate === targetDate && topVal === 1) {
             console.log(`[檢查] 發現 vvv[0][2] = 1，順球已完成，直接從落球開始...`);
             let success = await retryLuoqiu(records, sha, targetDate);
@@ -47,7 +46,6 @@ async function main() {
     }
 }
 
-// 順球重試邏輯（每 1 分鐘 1 次，最多 3 次）
 async function retryShun(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[順球] 第 ${attempt} 次嘗試抓取...`);
@@ -79,7 +77,6 @@ async function retryShun(records, sha, targetDate) {
     return false;
 }
 
-// 落球重試邏輯（每 3 分鐘 1 次，最多 3 次）
 async function retryLuoqiu(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[落球] 第 ${attempt} 次嘗試抓取...`);
@@ -179,7 +176,7 @@ async function fetchShunPilio(targetDate) {
     return null;
 }
 
-// 修正：精準抓取 9800 網站表格中對應落球序的欄位號碼
+// 修正：從 9800 抓取落球序（抓取該日期區塊後方的所有 2 位數，取最後 5 個即為落球序）
 async function fetchLuoqiu9800(targetDate) {
     try {
         let res = await fetch('http://www.9800.com.tw/lotto539/');
@@ -194,18 +191,14 @@ async function fetchLuoqiu9800(targetDate) {
         }
         if (idx === -1) return null;
 
-        // 從找到的日期行開始往後擷取一段表格 HTML
+        // 從找到的日期往後擷取 800 字元
         let sub = text.substring(idx, idx + 800);
+        let matches = sub.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
         
-        // 切割出所有的 <td> 欄位
-        let tds = sub.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-        if (tds && tds.length >= 4) {
-            // 第四個 <td> 包含落球序號碼
-            let fourthTdContent = tds[3];
-            let matches = fourthTdContent.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
-            if (matches && matches.length >= 5) {
-                return matches.slice(0, 5);
-            }
+        if (matches && matches.length >= 10) {
+            // 前 5 個通常是排序好的號碼，後面 5 個是落球序
+            let luoqiu = matches.slice(matches.length - 5);
+            if (luoqiu.length === 5) return luoqiu;
         }
     } catch (e) {}
     return null;
