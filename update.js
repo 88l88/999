@@ -12,9 +12,9 @@ const SHUN_INTERVAL_MS = 1 * 60 * 1000;   // 順球：每 1 分鐘
 const LUOQIU_INTERVAL_MS = 3 * 60 * 1000; // 落球：每 3 分鐘
 
 async function main() {
-    // 強制指定測試目標日期為 2026-11-07（避免伺服器時區誤判）
+    // 嚴格固定目標日期為 2026-11-07
     let targetDate = "2026-11-07"; 
-    console.log(`[${new Date().toISOString()}] 開始執行，強制指定目標日期: ${targetDate}`);
+    console.log(`[${new Date().toISOString()}] 開始執行，鎖定目標日期: ${targetDate}`);
 
     try {
         let fileData = await getFileContent();
@@ -48,7 +48,6 @@ async function main() {
     }
 }
 
-// 順球重試邏輯
 async function retryShun(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[順球] 第 ${attempt} 次嘗試抓取...`);
@@ -80,7 +79,6 @@ async function retryShun(records, sha, targetDate) {
     return false;
 }
 
-// 落球重試邏輯
 async function retryLuoqiu(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[落球] 第 ${attempt} 次嘗試抓取...`);
@@ -162,31 +160,29 @@ async function fetchShunPilio(targetDate) {
     return null;
 }
 
-// 精準抓取 9800 落球序：鎖定 2026-11-07，抓取其後方表格中的落球序號碼
+// 嚴格精準抓取 9800 第 4 個 <td>（落球序）
 async function fetchLuoqiu9800(targetDate) {
     try {
         let res = await fetch('http://www.9800.com.tw/lotto539/');
         let text = await res.text();
         let [y, m, d] = targetDate.split('-');
         let targetFull = `${y}-${m}-${d}`; // "2026-11-07"
-        let targetShort = `${m}-${d}`;     // "11-07"
         
         let idx = text.indexOf(targetFull);
-        if (idx === -1) {
-            idx = text.indexOf(targetShort);
-        }
         if (idx === -1) return null;
 
-        // 從找到的日期往後擷取 800 字元
-        let sub = text.substring(idx, idx + 800);
+        // 從找到該日期的位置往前找所屬的 <tr>，或直接截取該筆紀錄的 HTML 區塊
+        let trSub = text.substring(idx - 100, idx + 500);
         
-        // 尋找所有的 <font color="..."> 或是直接抓出該行所有的數字
-        let matches = sub.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
-        if (matches && matches.length >= 15) {
-            // 9800 該行結構會包含：期次、日期、排序號碼(5個)、落球序號碼(5個)
-            // 取最後 5 個數字即為落球序
-            let luoqiu = matches.slice(matches.length - 5);
-            if (luoqiu.length === 5) return luoqiu;
+        // 抓出該行所有的 <td> 元素
+        let tds = trSub.match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+        if (tds && tds.length >= 4) {
+            // 第四個 <td> 包含落球序號碼
+            let fourthTd = tds[3];
+            let matches = fourthTd.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
+            if (matches && matches.length >= 5) {
+                return matches.slice(0, 5);
+            }
         }
     } catch (e) {}
     return null;
