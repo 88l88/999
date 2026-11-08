@@ -22,9 +22,8 @@ async function main() {
 
         let topRecord = records[0];
         let topDate = topRecord[0];
-        let topVal = topRecord[2]; // 檢查是否有標記 1
+        let topVal = topRecord[2];
 
-        // 判斷是否直接從落球開始（條件：日期相符且標記為 1）
         if (topDate === targetDate && topVal === 1) {
             console.log(`[檢查] 發現 vvv[0][2] = 1，順球已完成，直接從落球開始...`);
             let success = await retryLuoqiu(records, sha, targetDate);
@@ -36,7 +35,6 @@ async function main() {
         console.log(`[檢查] 從順球階段開始...`);
         let shunSuccess = await retryShun(records, sha, targetDate);
         if (shunSuccess) {
-            // 順球成功後，立刻接著嘗試落球
             let updatedData = await getFileContent();
             await retryLuoqiu(updatedData.records, updatedData.sha, targetDate);
         } else {
@@ -48,7 +46,6 @@ async function main() {
     }
 }
 
-// 順球重試邏輯（每 1 分鐘 1 次，最多 3 次）
 async function retryShun(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[順球] 第 ${attempt} 次嘗試抓取...`);
@@ -80,7 +77,6 @@ async function retryShun(records, sha, targetDate) {
     return false;
 }
 
-// 落球重試邏輯（每 3 分鐘 1 次，最多 3 次）
 async function retryLuoqiu(records, sha, targetDate) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         console.log(`[落球] 第 ${attempt} 次嘗試抓取...`);
@@ -88,7 +84,6 @@ async function retryLuoqiu(records, sha, targetDate) {
         
         if (luoqiu && luoqiu.length === 5) {
             console.log(`[落球成功] 取得號碼: ${luoqiu.join(', ')}`);
-            // 替換首列：完全換成落球號碼，移除順球與 ,1 標記
             records[0] = [targetDate, luoqiu];
             await saveFile(records, sha);
             return true;
@@ -138,15 +133,15 @@ async function saveFile(records, sha) {
     console.log(`[已儲存檔案] ${PATH}`);
 }
 
+// 修正：20:30 以前抓昨天，20:30 以後抓今天
 function getTargetDrawDate() {
     let now = new Date();
     let utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    let twTime = new Date(utc + (3600000 * 8)); // 台灣時間
+    let twTime = new Date(utc + (3600000 * 8));
     
     let hours = twTime.getHours();
     let minutes = twTime.getMinutes();
     
-    // 如果現在時間還沒到晚上 20:30 (1230分鐘)，目標日期必須是「昨天」
     if (hours * 60 + minutes < 20 * 60 + 30) {
         twTime.setDate(twTime.getDate() - 1);
     }
@@ -179,7 +174,6 @@ async function fetchLuoqiu9800(targetDate) {
         let res = await fetch('http://www.9800.com.tw/lotto539/');
         let text = await res.text();
         let [y, m, d] = targetDate.split('-');
-        // 支援網站上可能出現的完整日期或僅月-日格式 (例如 11-06)
         let targetFull = `${y}-${m}-${d}`;
         let targetShort = `${m}-${d}`;
         
