@@ -1,107 +1,125 @@
-const { Octokit } = require("@octokit/rest");
-
-// 分別使用兩個不同帳號的 Token 授權
-const octokit88ll88 = new Octokit({ auth: process.env.PAT_88LL88 });
-const octokit88l88  = new Octokit({ auth: process.env.PAT_88L88 });
-
-// 四個目標倉庫、檔案與對應的變數名稱
-const TARGET_FILES = [
-  { owner: '88ll88', repo: '999', path: 'vvv.js', varName: 'vvv' },
-  { owner: '88ll88', repo: '888', path: 'ddd.js', varName: 'ddd' },
-  { owner: '88l88',  repo: '999', path: 'vvv.js', varName: 'vvv' },
-  { owner: '88l88',  repo: '888', path: 'ddd.js', varName: 'ddd' }
-];
+const fs = require('fs');
 
 async function main() {
-    console.log(`[${new Date().toISOString()}] 開始執行四倉庫同步更新檢查...`);
-    let targetDate = "2026-11-07"; 
+    console.log(`[${new Date().toISOString()}] 開始執行 vvv.js 更新檢查...`);
+
+    let content = '';
+    try {
+        content = fs.readFileSync('./vvv.js', 'utf8');
+    } catch (e) {
+        console.error('無法讀取 vvv.js:', e.message);
+        process.exit(1);
+    }
+
+    const match = content.match(/var\s+vvv\s*=\s*(\[[\s\S]*\]);?/);
+    if (!match) {
+        console.error('vvv.js 格式解析失敗');
+        process.exit(1);
+    }
+
+    let records = eval('(' + match[1] + ')');
+    let topRecord = records[0];
+    let topDate = topRecord[0];
+
+    let targetDate = getTargetDrawDate();
+    console.log(`目標日期: ${targetDate}，vvv.js 首列日期: ${topDate}`);
+
     let shun = await fetchLotteryShun(targetDate);
-    
     if (!shun || shun.length !== 5) {
-        console.log(`[${targetDate}] 尚未開獎或資料不完全，略過。`);
+        console.log(`[${targetDate}] 官方時尚未開獎或順球資料不完全。`);
         return;
     }
 
-    for (const target of TARGET_FILES) {
-        await updateSingleRepository(target, targetDate, shun);
+    // 邏輯判斷：
+    // 1. 若首列日期小於目標日期（落後兩期以上）：插入新列 ['日期', ['順球']]
+    if (topDate < targetDate) {
+        records.unshift([targetDate, shun]);
+        console.log(`[兩期以上未更新] 插入新首列: ${targetDate} [${shun.join(',')}]`);
+    } 
+    // 2. 若首列日期剛好等於目標日期：直接替換首列的順球（落球直接對應順球）
+    else if (topDate === targetDate) {
+        topRecord[1] = shun;
+        console.log(`[一期未更新/更新首列] 成功替換 ${targetDate} 順球: [${shun.join(',')}]`);
+    } else {
+        console.log('首列日期大於目標日期，無需更新。');
+        return;
     }
+
+    // 嚴格格式化輸出（只輸出兩欄結構：日期與順球）
+    let rows = records.map(r => {
+        let dateStr = r[0];
+        let shunStr = r[1].map(n => `'${n}'`).join(',');
+        return `['${dateStr}',[${shunStr}]]`;
+    }).join(',\n');
+
+    let newContent = `var vvv = [\n${rows}\n];\n`;
+    fs.writeFileSync('./vvv.js', newContent, 'utf8');
+    console.log('vvv.js 檔案更新完成！');
 }
 
-async function updateSingleRepository(target, targetDate, shun) {
-    const { owner, repo, path, varName } = target;
-    // 依據擁有者自動切換對應的 Octokit 實例
-    const activeOctokit = (owner === '88ll88') ? octokit88ll88 : octokit88l88;
-  
-    try {
-        const res = await activeOctokit.repos.getContent({ owner, repo, path });
-        const content = Buffer.from(res.data.content, 'base64').toString('utf-8');
-        const sha = res.data.sha;
+function getTargetDrawDate() {
+    let now = new Date();
+    let utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    let twTime = new Date(utc + (3600000 * 8));
 
-        const regex = new RegExp(`var\\s+${varName}\\s*=\\s*(\\[[\\s\\S]*\\]);?`);
-        const match = content.match(regex);
-        if (!match) {
-            console.error(`[錯誤] 找不到變數 ${varName} 於 ${owner}/${repo}/${path}`);
-            return;
-        }
+    let hours = twTime.getHours();
+    let minutes = twTime.getMinutes();
+    let totalMins = hours * 60 + minutes;
 
-        let records = eval('(' + match[1] + ')');
-        let topRecord = records[0];
-        let topDate = topRecord[0];
-
-        if (topDate < targetDate) {
-            records.unshift([targetDate, shun]);
-        } else if (topDate === targetDate) {
-            topRecord[1] = shun;
-        } else {
-            return;
-        }
-
-        let rows = records.map(r => {
-            let dateStr = r[0];
-            let shunStr = r[1].map(n => `'${n}'`).join(',');
-            return `  ['${dateStr}',[${shunStr}]]`;
-        }).join(',\n');
-
-        let newContent = `var ${varName} = [\n${rows}\n];\n`;
-        let encodedContent = Buffer.from(newContent, 'utf-8').toString('base64');
-
-        await activeOctokit.repos.createOrUpdateFileContents({
-            owner,
-            repo,
-            path,
-            message: `auto: update ${path} for ${targetDate}`,
-            content: encodedContent,
-            sha: sha
-        });
-        console.log(`[成功] 已更新 ${owner}/${repo}/${path}`);
-    } catch (e) {
-        console.error(`[錯誤] 更新 ${owner}/${repo}/${path} 失敗:`, e.message);
+    // 20:40 以前算昨天，之後算今天
+    if (totalMins < 1240) {
+        twTime.setDate(twTime.getDate() - 1);
     }
+    // 周日休息
+    if (twTime.getDay() === 0) {
+        twTime.setDate(twTime.getDate() - 1);
+    }
+
+    let yyyy = twTime.getFullYear();
+    let mm = String(twTime.getMonth() + 1).padStart(2, '0');
+    let dd = String(twTime.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
 }
 
 async function fetchLotteryShun(targetDate) {
     try {
         const res = await fetch('http://www.9800.com.tw/lotto539/drop.html');
         const text = await res.text();
+
         const [y, m, d] = targetDate.split('-');
         const mingGuoYear = parseInt(y) - 1911;
-        const targets = [`${mingGuoYear}/${m}/${d}`, `${targetDate}`, `${mingGuoYear}-${m}-${d}`];
+        
+        const targets = [
+            `${mingGuoYear}/${m}/${d}`,
+            `${targetDate}`,
+            `${mingGuoYear}-${m}-${d}`
+        ];
+
         let dateIdx = -1;
         for (let t of targets) {
             dateIdx = text.indexOf(t);
             if (dateIdx !== -1) break;
         }
+
         if (dateIdx === -1) return null;
+
         const subText = text.substring(dateIdx, dateIdx + 500);
         const matches = subText.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
+
         if (!matches || matches.length < 6) return null;
+
         let mIdx = matches.indexOf(m);
         let dIdx = matches.indexOf(d, mIdx + 1);
+
         if (dIdx !== -1 && matches.length >= dIdx + 6) {
             let shun = matches.slice(dIdx + 1, dIdx + 6);
-            if (shun.length === 5 && !shun.includes('00')) return shun;
+            if (shun.length === 5 && !shun.includes('00')) {
+                return shun;
+            }
         }
-    } catch (e) {}
+    } catch (e) {
+        console.error('抓取發生錯誤:', e.message);
+    }
     return null;
 }
 
