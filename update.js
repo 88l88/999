@@ -133,7 +133,6 @@ async function saveFile(records, sha) {
     console.log(`[已儲存檔案] ${PATH}`);
 }
 
-// 修正：20:30 以前抓昨天，20:30 以後抓今天
 function getTargetDrawDate() {
     let now = new Date();
     let utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -152,18 +151,26 @@ function getTargetDrawDate() {
     return `${yyyy}-${mm}-${dd}`;
 }
 
+// 修正：精準抓取 number-cell 裡的 5 個順球號碼
 async function fetchShunPilio(targetDate) {
     try {
         let res = await fetch('https://www.pilio.idv.tw/lto539/list.asp');
         let text = await res.text();
         let [y, m, d] = targetDate.split('-');
-        let targetStr = `${m}/${d}`;
+        let targetStr = `${m}/${d}`; // 例如 "11/07"
+        
         let idx = text.indexOf(targetStr);
         if (idx === -1) return null;
-        let sub = text.substring(idx, idx + 300);
-        let matches = sub.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
-        if (matches && matches.length >= 5) {
-            return matches.slice(0, 5);
+
+        // 從日期位置往後找 number-cell 區塊
+        let sub = text.substring(idx, idx + 600);
+        let numCellMatch = sub.match(/class="number-cell"[^>]*>([\s\S]*?)<\/td>/);
+        if (numCellMatch) {
+            let numText = numCellMatch[1];
+            let matches = numText.match(/\b(0[1-9]|[12][0-9]|3[0-9])\b/g);
+            if (matches && matches.length >= 5) {
+                return matches.slice(0, 5);
+            }
         }
     } catch (e) {}
     return null;
